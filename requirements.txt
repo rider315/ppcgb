@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+pandas
+pymongo
+bcrypt
+python-dotenv
+magnum
