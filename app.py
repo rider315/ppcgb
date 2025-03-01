@@ -124,27 +124,26 @@ import os
 from typing import Optional, List
 from pydantic import BaseModel
 from auth import register_user, login_user  # Import from auth.py
-import bcrypt
-from pymongo import MongoClient
+from mangum import Mangum  # Import Mangum for Vercel
 
 app = FastAPI()
 
-# Enable CORS for frontend communication
+# Enable CORS for frontend communication (update allow_origins for Vercel deployment)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Allow requests from your frontend
+    allow_origins=["https://your-frontend-vercel-url.vercel.app"],  # Update to your frontend Vercel URL or use ["*"] for testing
     allow_credentials=True,
     allow_methods=["*"],  # Allow all HTTP methods (GET, POST, etc.)
     allow_headers=["*"],  # Allow all headers
 )
 
-# MongoDB connection (using .env or default local MongoDB)
+# MongoDB connection (using .env or default MongoDB Atlas)
 mongo_client = MongoClient(os.getenv("MONGO_URI", "mongodb://localhost:27017/"))
 db = mongo_client["ppc_goat_db"]
 users_collection = db["users"]
 
-# Temporary file storage
-UPLOAD_DIR = "uploads"
+# Temporary file storage (use /tmp for Vercel serverless environment)
+UPLOAD_DIR = "/tmp/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 dict_manager = DictionaryManager5Lang()
@@ -328,3 +327,6 @@ async def get_insights(filename: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating insights: {str(e)}")
+
+# Export handler for Vercel serverless environment
+handler = Mangum(app)
