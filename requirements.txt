@@ -4,4 +4,4 @@ pandas
 pymongo
 bcrypt
 python-dotenv
-magnum
+mangum
