@@ -113,7 +113,6 @@
 # async def login(request: AuthRequest):
 #     return await login_user(request.email, request.password)
 
-
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -130,10 +129,10 @@ from mangum import Mangum  # Import Mangum for Vercel
 
 app = FastAPI()
 
-# Enable CORS for frontend communication (update allow_origins for Vercel deployment)
+# Enable CORS for frontend communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Update to your frontend Vercel URL or use ["*"] for testing
+    allow_origins=["https://ppcgoatf.vercel.app"],  # Update to your frontend Vercel URL
     allow_credentials=True,
     allow_methods=["*"],  # Allow all HTTP methods (GET, POST, etc.)
     allow_headers=["*"],  # Allow all headers
