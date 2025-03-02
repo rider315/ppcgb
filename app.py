@@ -1,154 +1,39 @@
-# from fastapi import FastAPI, UploadFile, File, HTTPException
-# from fastapi.responses import FileResponse
-# from fastapi.middleware.cors import CORSMiddleware
-# import pandas as pd
-# from calculation import calculate_new_bid, EQUIPMENT_SETTINGS
-# from utils.dictionary_manager import DictionaryManager5Lang
-# from format_config import apply_template_format
-# import os
-# from typing import Optional
-# from pydantic import BaseModel
-# from auth import register_user, login_user  # Import simplified auth functions
-
-# app = FastAPI()
-# dict_manager = DictionaryManager5Lang()
-
-# # Temporary file storage
-# UPLOAD_DIR = "uploads"
-# os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# # Enable CORS for frontend communication
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["http://localhost:5173"],
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
-
-# # Pydantic model for the /optimize endpoint
-# class OptimizeRequest(BaseModel):
-#     target_roas: float
-#     strategy: str
-#     filename: str
-#     equipment: Optional[dict] = None
-
-# # Pydantic model for authentication requests
-# class AuthRequest(BaseModel):
-#     email: str
-#     password: str
-
-# @app.post("/upload")
-# async def upload_file(file: UploadFile = File(...)):
-#     if not file.filename.endswith(".xlsx"):
-#         raise HTTPException(status_code=400, detail="Only XLSX files are supported")
-    
-#     file_path = os.path.join(UPLOAD_DIR, file.filename)
-#     with open(file_path, "wb") as f:
-#         f.write(await file.read())
-    
-#     try:
-#         df = pd.read_excel(file_path)
-#     except Exception as e:
-#         os.remove(file_path)
-#         raise HTTPException(status_code=400, detail=f"Invalid file: {str(e)}")
-    
-#     return {"filename": file.filename, "message": "File uploaded successfully"}
-
-# @app.post("/optimize")
-# async def optimize_bids(request: OptimizeRequest):
-#     filename = request.filename
-#     target_roas = request.target_roas
-#     strategy = request.strategy
-#     equipment = request.equipment
-
-#     if not filename:
-#         raise HTTPException(status_code=400, detail="No file specified")
-    
-#     file_path = os.path.join(UPLOAD_DIR, filename)
-#     if not os.path.exists(file_path):
-#         raise HTTPException(status_code=404, detail="File not found")
-    
-#     try:
-#         df = pd.read_excel(file_path)
-#         df["Altes Gebot"] = df.get("Gebot", 0.0)
-#         df["ROAS"] = df.get("ROAS", None)
-
-#         df["Neues Gebot"] = df.apply(
-#             lambda row: calculate_new_bid(
-#                 current_bid=row["Altes Gebot"],
-#                 target_roas=target_roas,
-#                 current_roas=row["ROAS"],
-#                 strategy=strategy,
-#                 row_data=row.to_dict(),
-#                 equipment=equipment if strategy == "Individuell" else None
-#             ),
-#             axis=1
-#         )
-
-#         df["Veränderung in %"] = ((df["Neues Gebot"] - df["Altes Gebot"]) / df["Altes Gebot"] * 100).round(2).fillna(0)
-#         df["Veränderung in €"] = (df["Neues Gebot"] - df["Altes Gebot"]).round(2)
-
-#         formatted_df = apply_template_format(df)
-#         output_path = os.path.join(UPLOAD_DIR, f"optimized_{filename}")
-#         formatted_df.to_excel(output_path, index=False)
-
-#         return {"optimized_filename": f"optimized_{filename}", "message": "Bids optimized successfully"}
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
-
-# @app.get("/download/{filename}")
-# async def download_file(filename: str):
-#     file_path = os.path.join(UPLOAD_DIR, filename)
-#     if not os.path.exists(file_path):
-#         raise HTTPException(status_code=404, detail="File not found")
-#     return FileResponse(file_path, filename=filename, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-# # Authentication endpoints
-# @app.post("/register")
-# async def register(request: AuthRequest):
-#     return await register_user(request.email, request.password)
-
-# @app.post("/login")
-# async def login(request: AuthRequest):
-#     return await login_user(request.email, request.password)
-
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
+import os
+from typing import Optional, List
+from pydantic import BaseModel
 from calculation import calculate_new_bid, EQUIPMENT_SETTINGS
 from utils.dictionary_manager import DictionaryManager5Lang
 from format_config import apply_template_format
 from sku_matcher import SKUMatcher
-import os
-from typing import Optional, List
-from pydantic import BaseModel
 from auth import register_user, login_user  # Import from auth.py
 from mangum import Mangum  # Import Mangum for Vercel
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
 # Enable CORS for frontend communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://ppcgoatf.vercel.app"],  # Update to your frontend Vercel URL
+    allow_origins=["https://ppcgoatf.vercel.app"],  # Specific frontend URL for security
     allow_credentials=True,
     allow_methods=["*"],  # Allow all HTTP methods (GET, POST, etc.)
     allow_headers=["*"],  # Allow all headers
 )
-
-# MongoDB connection (using .env or default MongoDB Atlas)
-mongo_client = MongoClient(os.getenv("MONGO_URI", "mongodb://localhost:27017/"))
-db = mongo_client["ppc_goat_db"]
-users_collection = db["users"]
 
 # Temporary file storage (use /tmp for Vercel serverless environment)
 UPLOAD_DIR = "/tmp/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 dict_manager = DictionaryManager5Lang()
-known_skus = ["SKUXYZAA", "SKUXYZAB"]  # Example SKUs; load from a file or database in production
+known_skus = ["SKUXYZAA", "SKUXYZAB"]  # Example SKUs; consider loading from a DB or file
 sku_matcher = SKUMatcher(known_skus)
 
 # Pydantic models
@@ -174,13 +59,14 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Only XLSX files are supported")
     
     file_path = os.path.join(UPLOAD_DIR, file.filename)
-    with open(file_path, "wb") as f:
-        f.write(await file.read())
-    
     try:
+        with open(file_path, "wb") as f:
+            f.write(await file.read())
         df = pd.read_excel(file_path)
     except Exception as e:
-        os.remove(file_path)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        logger.error(f"Error uploading file: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Invalid file: {str(e)}")
     
     return {"filename": file.filename, "message": "File uploaded successfully"}
@@ -247,12 +133,14 @@ async def optimize_bids(request: OptimizeRequest):
 
         return {"optimized_filename": f"optimized_{filename}", "message": "Bids optimized successfully"}
     except Exception as e:
+        logger.error(f"Error optimizing bids: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
 @app.get("/download/{filename}")
 async def download_file(filename: str):
     file_path = os.path.join(UPLOAD_DIR, filename)
     if not os.path.exists(file_path):
+        logger.error(f"File not found: {file_path}")
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(file_path, filename=filename, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
@@ -262,8 +150,10 @@ async def register(request: RegisterRequest):
         result = await register_user(request.name, request.email, request.password)
         return result
     except HTTPException as e:
+        logger.error(f"Registration error: {str(e.detail)}")
         raise e
     except Exception as e:
+        logger.error(f"Registration error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Registration error: {str(e)}")
 
 @app.post("/login")
@@ -272,14 +162,17 @@ async def login(request: LoginRequest):
         result = await login_user(request.email, request.password)
         return result
     except HTTPException as e:
+        logger.error(f"Login error: {str(e.detail)}")
         raise e
     except Exception as e:
+        logger.error(f"Login error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Login error: {str(e)}")
 
 @app.get("/insights/{filename}")
 async def get_insights(filename: str):
     file_path = os.path.join(UPLOAD_DIR, f"optimized_{filename}")
     if not os.path.exists(file_path):
+        logger.error(f"Optimized file not found: {file_path}")
         raise HTTPException(status_code=404, detail="Optimized file not found")
     
     try:
@@ -327,6 +220,7 @@ async def get_insights(filename: str):
             "examples": examples
         }
     except Exception as e:
+        logger.error(f"Error generating insights: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error generating insights: {str(e)}")
 
 # Export handler for Vercel serverless environment
