@@ -2,46 +2,38 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
-import os
-from typing import Optional, List
-from pydantic import BaseModel
 from calculation import calculate_new_bid, EQUIPMENT_SETTINGS
 from utils.dictionary_manager import DictionaryManager5Lang
 from format_config import apply_template_format
 from sku_matcher import SKUMatcher
-from auth import register_user, login_user  # Import from auth.py
-from mangum import Mangum  # Import Mangum for Vercel
-import logging
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+import os
+from typing import Optional, List
+from pydantic import BaseModel
+from auth import register_user, login_user
+from mangum import Mangum  # Ensure this is the correct version from requirements.txt
 
 app = FastAPI()
 
 # Enable CORS for frontend communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Specific frontend URL for security
+    allow_origins=["*"],  # Your frontend Vercel URL
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all HTTP methods (GET, POST, etc.)
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["https://ppcgoatf.vercel.app", "http://localhost:5173", "http://localhost:8000", "https://ppcgb.vercel.app/register", "https://ppcgoatf.vercel.app", "https://ppcgb.vercel.app", "https://ppcgb.vercel.app:8000"],  # Add multiple origins here
-#     allow_credentials=True,
-#     allow_methods=["*"],  # Allow all HTTP methods (GET, POST, etc.)
-#     allow_headers=["*"],  # Allow all headers
-# )
+# MongoDB connection (using .env or default MongoDB Atlas)
+mongo_client = MongoClient(os.getenv("MONGO_URI", "mongodb://localhost:27017/"))
+db = mongo_client["ppc_goat_db"]
+users_collection = db["users"]
 
 # Temporary file storage (use /tmp for Vercel serverless environment)
 UPLOAD_DIR = "/tmp/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 dict_manager = DictionaryManager5Lang()
-known_skus = ["SKUXYZAA", "SKUXYZAB"]  # Example SKUs; consider loading from a DB or file
+known_skus = ["SKUXYZAA", "SKUXYZAB"]  # Example SKUs; load from a file or database in production
 sku_matcher = SKUMatcher(known_skus)
 
 # Pydantic models
@@ -67,14 +59,13 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Only XLSX files are supported")
     
     file_path = os.path.join(UPLOAD_DIR, file.filename)
+    with open(file_path, "wb") as f:
+        f.write(await file.read())
+    
     try:
-        with open(file_path, "wb") as f:
-            f.write(await file.read())
         df = pd.read_excel(file_path)
     except Exception as e:
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        logger.error(f"Error uploading file: {str(e)}")
+        os.remove(file_path)
         raise HTTPException(status_code=400, detail=f"Invalid file: {str(e)}")
     
     return {"filename": file.filename, "message": "File uploaded successfully"}
@@ -98,9 +89,8 @@ async def optimize_bids(request: OptimizeRequest):
         df = pd.read_excel(file_path)
         df["Altes Gebot"] = df.get("Gebot", 0.0)
         df["ROAS"] = df.get("ROAS", None)
-        df["SKU"] = df.get("SKU", None)  # Ensure SKU column exists
+        df["SKU"] = df.get("SKU", None)
 
-        # Apply SKU-specific rules if provided
         if sku_rules:
             for rule in sku_rules:
                 skus = sku_matcher.get_skus_for_keyword(rule["sku"]) or [rule["sku"]]
@@ -118,7 +108,6 @@ async def optimize_bids(request: OptimizeRequest):
                         axis=1
                     )
 
-        # Apply global strategy if no SKU rules or for rows without SKU rules
         mask_no_sku = df["SKU"].isna() | ~df["SKU"].isin([rule["sku"] for rule in sku_rules or []])
         df.loc[mask_no_sku, "Neues Gebot"] = df.loc[mask_no_sku].apply(
             lambda row: calculate_new_bid(
@@ -141,15 +130,13 @@ async def optimize_bids(request: OptimizeRequest):
 
         return {"optimized_filename": f"optimized_{filename}", "message": "Bids optimized successfully"}
     except Exception as e:
-        logger.error(f"Error optimizing bids: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
 @app.get("/download/{filename}")
 async def download_file(filename: str):
     file_path = os.path.join(UPLOAD_DIR, filename)
     if not os.path.exists(file_path):
-        logger.error(f"File not found: {file_path}")
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail="File not found or expired")
     return FileResponse(file_path, filename=filename, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 @app.post("/register")
@@ -158,10 +145,8 @@ async def register(request: RegisterRequest):
         result = await register_user(request.name, request.email, request.password)
         return result
     except HTTPException as e:
-        logger.error(f"Registration error: {str(e.detail)}")
         raise e
     except Exception as e:
-        logger.error(f"Registration error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Registration error: {str(e)}")
 
 @app.post("/login")
@@ -170,18 +155,15 @@ async def login(request: LoginRequest):
         result = await login_user(request.email, request.password)
         return result
     except HTTPException as e:
-        logger.error(f"Login error: {str(e.detail)}")
         raise e
     except Exception as e:
-        logger.error(f"Login error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Login error: {str(e)}")
 
 @app.get("/insights/{filename}")
 async def get_insights(filename: str):
     file_path = os.path.join(UPLOAD_DIR, f"optimized_{filename}")
     if not os.path.exists(file_path):
-        logger.error(f"Optimized file not found: {file_path}")
-        raise HTTPException(status_code=404, detail="Optimized file not found")
+        raise HTTPException(status_code=404, detail="Optimized file not found or expired")
     
     try:
         df = pd.read_excel(file_path)
@@ -228,7 +210,6 @@ async def get_insights(filename: str):
             "examples": examples
         }
     except Exception as e:
-        logger.error(f"Error generating insights: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error generating insights: {str(e)}")
 
 # Export handler for Vercel serverless environment
