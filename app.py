@@ -10,7 +10,8 @@ import os
 from typing import Optional, List
 from pydantic import BaseModel
 from auth import register_user, login_user
-from mangum import Mangum  # Ensure this is the correct version from requirements.txt
+from pymongo import MongoClient  # Add this import
+from mangum import Mangum
 
 app = FastAPI()
 
