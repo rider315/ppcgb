@@ -20,21 +20,21 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 # Enable CORS for frontend communication
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["https://ppcgoatf.vercel.app"],  # Specific frontend URL for security
-#     allow_credentials=True,
-#     allow_methods=["*"],  # Allow all HTTP methods (GET, POST, etc.)
-#     allow_headers=["*"],  # Allow all headers
-# )
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://ppcgoatf.vercel.app", "http://localhost:5173", "http://localhost:8000", "https://ppcgb.vercel.app/register", "https://ppcgoatf.vercel.app", "https://ppcgb.vercel.app", "https://ppcgb.vercel.app:8000"],  # Add multiple origins here
+    allow_origins=["*"],  # Specific frontend URL for security
     allow_credentials=True,
     allow_methods=["*"],  # Allow all HTTP methods (GET, POST, etc.)
     allow_headers=["*"],  # Allow all headers
 )
+
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["https://ppcgoatf.vercel.app", "http://localhost:5173", "http://localhost:8000", "https://ppcgb.vercel.app/register", "https://ppcgoatf.vercel.app", "https://ppcgb.vercel.app", "https://ppcgb.vercel.app:8000"],  # Add multiple origins here
+#     allow_credentials=True,
+#     allow_methods=["*"],  # Allow all HTTP methods (GET, POST, etc.)
+#     allow_headers=["*"],  # Allow all headers
+# )
 
 # Temporary file storage (use /tmp for Vercel serverless environment)
 UPLOAD_DIR = "/tmp/uploads"
