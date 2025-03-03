@@ -10,31 +10,33 @@ import os
 from typing import Optional, List
 from pydantic import BaseModel
 from auth import register_user, login_user
-from pymongo import MongoClient  # Import for MongoDB
-from mangum import Mangum  # Ensure this is the correct version from requirements.txt
+from pymongo import MongoClient
+import uvicorn
 
+# Initialize FastAPI app
 app = FastAPI()
 
 # Enable CORS for frontend communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Your frontend Vercel URL
+    allow_origins=["*"],  # Replace with your frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# MongoDB connection (using .env or default MongoDB Atlas)
+# MongoDB connection (using environment variable or default)
 mongo_client = MongoClient(os.getenv("MONGO_URI", "mongodb://localhost:27017/"))
 db = mongo_client["ppc_goat_db"]
 users_collection = db["users"]
 
-# Temporary file storage (use /tmp for Vercel serverless environment)
+# Temporary file storage for Vercel’s serverless environment
 UPLOAD_DIR = "/tmp/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Initialize helper classes
 dict_manager = DictionaryManager5Lang()
-known_skus = ["SKUXYZAA", "SKUXYZAB"]  # Example SKUs; load from a file or database in production
+known_skus = ["SKUXYZAA", "SKUXYZAB"]  # Replace with your SKUs or load dynamically
 sku_matcher = SKUMatcher(known_skus)
 
 # Pydantic models
@@ -54,6 +56,7 @@ class LoginRequest(BaseModel):
     email: str
     password: str
 
+# Endpoints
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     if not file.filename.endswith(".xlsx"):
@@ -169,7 +172,6 @@ async def get_insights(filename: str):
     try:
         df = pd.read_excel(file_path)
         
-        # Calculate summary statistics
         total_impressions = df["Impressions"].sum()
         total_clicks = df["Klicks"].sum()
         ad_spend = df["Ausgaben"].sum()
@@ -181,9 +183,8 @@ async def get_insights(filename: str):
         bids_raised = len(df[df["Veränderung in %"] > 0])
         bid_reductions = len(df[df["Veränderung in %"] < 0])
         updated_rows = len(df[df["Veränderung in %"] != 0])
-        new_roas_target = 5.5  # This could be dynamic based on the request
+        new_roas_target = 5.5  # Adjust as needed
 
-        # Get example rows for insights
         examples = df.sample(n=3, random_state=42)[[
             "Keyword-Text", "ROAS", "Conversion-Rate", "Impressions", "Ausgaben", "Altes Gebot", "Neues Gebot"
         ]].to_dict(orient='records')
@@ -213,5 +214,13 @@ async def get_insights(filename: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating insights: {str(e)}")
 
-# Export handler for Vercel serverless environment
-handler = Mangum(app)
+# Custom ASGI handler for Vercel
+def handler(event, context):
+    from uvicorn import Config, Server
+    config = Config(app=app, host="0.0.0.0", port=8000, log_level="info")
+    server = Server(config)
+    server.run()
+    return {"statusCode": 200, "body": "Server started"}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
