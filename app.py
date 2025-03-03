@@ -11,7 +11,7 @@ from typing import Optional, List
 from pydantic import BaseModel
 from auth import register_user, login_user
 from pymongo import MongoClient
-import uvicorn
+from mangum import Mangum
 
 # Initialize FastAPI app
 app = FastAPI()
@@ -19,7 +19,7 @@ app = FastAPI()
 # Enable CORS for frontend communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Replace with your frontend URL
+    allow_origins=["*"],  # Replace with your frontend URL in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -214,13 +214,9 @@ async def get_insights(filename: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating insights: {str(e)}")
 
-# Custom ASGI handler for Vercel
-def handler(event, context):
-    from uvicorn import Config, Server
-    config = Config(app=app, host="0.0.0.0", port=8000, log_level="info")
-    server = Server(config)
-    server.run()
-    return {"statusCode": 200, "body": "Server started"}
+# Mangum handler for Vercel serverless environment
+handler = Mangum(app, lifespan="off")
 
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
